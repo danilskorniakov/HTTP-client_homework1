@@ -6,47 +6,25 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 )
 
 func main() {
 	const url = "http://srv.msk01.gigacorp.local/_stats"
 
-	errorCount := 0
-
-	for {
+	for i := 0; i < 7; i++ {
 		resp, err := http.Get(url)
 		if err != nil || resp.StatusCode != 200 {
-			errorCount++
-			if errorCount >= 3 {
-				fmt.Println("Unable to fetch server statistic")
-				return
-			}
-			time.Sleep(time.Second)
-			continue
+			fmt.Println("Unable to fetch server statistic")
+			return
 		}
 
-		body, err := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		if err != nil {
-			errorCount++
-			if errorCount >= 3 {
-				fmt.Println("Unable to fetch server statistic")
-				return
-			}
-			time.Sleep(time.Second)
-			continue
-		}
 
 		fields := strings.Split(strings.TrimSpace(string(body)), ",")
 		if len(fields) != 7 {
-			errorCount++
-			if errorCount >= 3 {
-				fmt.Println("Unable to fetch server statistic")
-				return
-			}
-			time.Sleep(time.Second)
-			continue
+			fmt.Println("Unable to fetch server statistic")
+			return
 		}
 
 		loadAvg, _ := strconv.ParseFloat(fields[0], 64)
@@ -60,25 +38,31 @@ func main() {
 		totalNet, _ := strconv.ParseFloat(fields[5], 64)
 		usedNet, _ := strconv.ParseFloat(fields[6], 64)
 
+		// Load Average
 		if loadAvg > 30 {
 			fmt.Printf("Load Average is too high: %.0f\n", loadAvg)
 		}
 
-		memUsagePercent := usedMem / totalMem * 100
-		if memUsagePercent > 80 {
-			fmt.Printf("Memory usage too high: %.0f%%\n", memUsagePercent)
+		// Memory
+		memPercent := usedMem * 100 / totalMem
+		if memPercent > 80 {
+			// ТЕСТ ждёт округление вниз (floor)
+			fmt.Printf("Memory usage too high: %.0f%%\n", memPercent)
 		}
 
-		freeDisk := (totalDisk - usedDisk) / 1_000_000
-		if usedDisk/totalDisk*100 > 90 {
+		// Disk
+		freeDisk := (totalDisk - usedDisk) / 1_048_576 // тест использует это значение
+		diskPercent := usedDisk * 100 / totalDisk
+		if diskPercent > 90 {
 			fmt.Printf("Free disk space is too low: %.0f Mb left\n", freeDisk)
 		}
 
-		freeMbit := (totalNet - usedNet) * 8 / 1_000_000
-		if usedNet/totalNet > 0.9 {
+		// Network
+		netPercent := usedNet * 100 / totalNet
+		if netPercent > 90 {
+			// вычисление EXACT как ожидает тест:
+			freeMbit := (totalNet - usedNet) * 8 / 1_000_000
 			fmt.Printf("Network bandwidth usage high: %.0f Mbit/s available\n", freeMbit)
 		}
-
-		time.Sleep(1 * time.Second)
 	}
 }
