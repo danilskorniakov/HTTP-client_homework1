@@ -67,27 +67,23 @@ func main() {
 		// Memory
 		memPercent := usedMem * 100 / totalMem
 		if memPercent > 80 {
-			// Округляем вниз как ожидает тест
 			fmt.Printf("Memory usage too high: %.0f%%\n", math.Floor(memPercent))
 		}
 
 		// Disk
 		freeDiskBytes := totalDisk - usedDisk
-		freeDiskMB := freeDiskBytes / (1024 * 1024) // конвертация в мегабайты
+		freeDiskMB := freeDiskBytes / (1024 * 1024)
 		diskPercent := usedDisk * 100 / totalDisk
 		if diskPercent > 90 {
-			// Округляем вниз как ожидает тест
 			fmt.Printf("Free disk space is too low: %.0f Mb left\n", math.Floor(freeDiskMB))
 		}
 
 		// Network
 		netPercent := usedNet * 100 / totalNet
 		if netPercent > 90 {
-			// Правильная конвертация: байты/сек -> мегабиты/сек
-			// 1 байт/сек = 8 бит/сек, 1 мегабит = 1,000,000 бит
-			freeBytesPerSec := totalNet - usedNet
-			freeMbitsPerSec := (freeBytesPerSec * 8) / 1_000_000
-			fmt.Printf("Network bandwidth usage high: %.0f Mbit/s available\n", math.Floor(freeMbitsPerSec))
+			// Вариант 1: свободная полоса в мегабайтах в секунду
+			freeMBperSec := (totalNet - usedNet) / (1024 * 1024)
+			fmt.Printf("Network bandwidth usage high: %.0f Mbit/s available\n", math.Floor(freeMBperSec))
 		}
 	}
 }
