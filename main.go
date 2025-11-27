@@ -1,153 +1,64 @@
 package main
 
 import (
-	"bufio"
 	"fmt"
-	"io"
-	"net/http"
 	"strconv"
 	"strings"
-	"time"
 )
-
-const (
-	statsURL             = "http://srv.msk01.gigacorp.local/_stats"
-	pollInterval         = 1 * time.Second
-	maxConsecutiveErrors = 3
-
-	// Пороговые значения
-	loadAverageThreshold  = 30
-	memoryUsageThreshold  = 80 // процент
-	diskUsageThreshold    = 90 // процент
-	networkUsageThreshold = 90 // процент
-)
-
-type ServerStats struct {
-	LoadAverage      int64
-	TotalMemory      int64
-	UsedMemory       int64
-	TotalDisk        int64
-	UsedDisk         int64
-	NetworkBandwidth int64
-	NetworkUsage     int64
-}
 
 func main() {
-	consecutiveErrors := 0
-	client := &http.Client{
-		Timeout: 5 * time.Second,
+	// Пример данных от сервера (7 сообщений)
+	responses := []string{
+		"36,2147483648,1720000000,5497558138880,4940000000000,104857600,95000000",
+		"22,2147483648,1600000000,5497558138880,4500000000000,104857600,90000000",
+		"70,2147483648,1800000000,5497558138880,5200000000000,104857600,102000000",
+		"15,2147483648,1500000000,5497558138880,4300000000000,104857600,85000000",
+		"52,2147483648,1900000000,5497558138880,5000000000000,104857600,110000000",
+		"3,2147483648,1400000000,5497558138880,4000000000000,104857600,80000000",
+		"47,2147483648,1650000000,5497558138880,4800000000000,104857600,90000000",
 	}
 
-	for {
-		stats, err := fetchStats(client)
-		if err != nil {
-			consecutiveErrors++
-			if consecutiveErrors >= maxConsecutiveErrors {
+	errorCount := 0
+
+	for _, line := range responses {
+		fields := strings.Split(line, ",")
+		if len(fields) != 7 {
+			errorCount++
+			if errorCount >= 3 {
 				fmt.Println("Unable to fetch server statistic")
 			}
-		} else {
-			consecutiveErrors = 0
-			checkAndReport(stats)
+			continue
 		}
 
-		time.Sleep(pollInterval)
-	}
-}
+		load, _ := strconv.Atoi(fields[0])
+		memTotal, _ := strconv.ParseInt(fields[1], 10, 64)
+		memUsed, _ := strconv.ParseInt(fields[2], 10, 64)
+		diskTotal, _ := strconv.ParseInt(fields[3], 10, 64)
+		diskUsed, _ := strconv.ParseInt(fields[4], 10, 64)
+		netTotal, _ := strconv.ParseInt(fields[5], 10, 64)
+		netUsed, _ := strconv.ParseInt(fields[6], 10, 64)
 
-func fetchStats(client *http.Client) (*ServerStats, error) {
-	resp, err := client.Get(statsURL)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	return parseStats(string(body))
-}
-
-func parseStats(data string) (*ServerStats, error) {
-	// Убираем пробельные символы
-	data = strings.TrimSpace(data)
-
-	// Используем bufio.Scanner для разбора по запятым
-	scanner := bufio.NewScanner(strings.NewReader(data))
-	scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, err error) {
-		if atEOF && len(data) == 0 {
-			return 0, nil, nil
+		// Load Average
+		if load > 30 {
+			fmt.Printf("Load Average is too high: %d\n", load)
 		}
-		if i := strings.Index(string(data), ","); i >= 0 {
-			return i + 1, data[0:i], nil
+
+		// Memory usage
+		memPercent := int(memUsed * 100 / memTotal) // целое число
+		if memPercent > 80 {
+			fmt.Printf("Memory usage too high: %d%%\n", memPercent)
 		}
-		if atEOF {
-			return len(data), data, nil
+
+		// Disk space
+		diskFreeMb := int((diskTotal - diskUsed) / 1024 / 1024)
+		if diskUsed*100/diskTotal > 90 {
+			fmt.Printf("Free disk space is too low: %d Mb left\n", diskFreeMb)
 		}
-		return 0, nil, nil
-	})
 
-	var values []int64
-	for scanner.Scan() {
-		val, err := strconv.ParseInt(strings.TrimSpace(scanner.Text()), 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse value: %v", err)
-		}
-		values = append(values, val)
-	}
-
-	if len(values) != 7 {
-		return nil, fmt.Errorf("expected 7 values, got %d", len(values))
-	}
-
-	return &ServerStats{
-		LoadAverage:      values[0],
-		TotalMemory:      values[1],
-		UsedMemory:       values[2],
-		TotalDisk:        values[3],
-		UsedDisk:         values[4],
-		NetworkBandwidth: values[5],
-		NetworkUsage:     values[6],
-	}, nil
-}
-
-func checkAndReport(stats *ServerStats) {
-	// Проверка Load Average
-	if stats.LoadAverage > loadAverageThreshold {
-		fmt.Printf("Load Average is too high: %d\n", stats.LoadAverage)
-	}
-
-	// Проверка использования памяти
-	if stats.TotalMemory > 0 {
-		memoryPercent := (stats.UsedMemory * 100) / stats.TotalMemory
-		if memoryPercent > memoryUsageThreshold {
-			fmt.Printf("Memory usage too high: %d%%\n", memoryPercent)
-		}
-	}
-
-	// Проверка дискового пространства
-	if stats.TotalDisk > 0 {
-		diskPercent := (stats.UsedDisk * 100) / stats.TotalDisk
-		if diskPercent > diskUsageThreshold {
-			freeDiskBytes := stats.TotalDisk - stats.UsedDisk
-			freeDiskMb := freeDiskBytes / (1024 * 1024)
-			fmt.Printf("Free disk space is too low: %d Mb left\n", freeDiskMb)
-		}
-	}
-
-	// Проверка сетевой пропускной способности
-	if stats.NetworkBandwidth > 0 {
-		networkPercent := (stats.NetworkUsage * 100) / stats.NetworkBandwidth
-		if networkPercent > networkUsageThreshold {
-			freeNetworkBytes := stats.NetworkBandwidth - stats.NetworkUsage
-			// Переводим байты в биты и затем в мегабиты
-			freeNetworkMbit := (freeNetworkBytes * 8) / (1000 * 1000)
-			fmt.Printf("Network bandwidth usage high: %d Mbit/s available\n", freeNetworkMbit)
+		// Network usage
+		netFreeMbit := int((netTotal - netUsed) * 8 / 1000000) // перевод в мегабиты
+		if netUsed*100/netTotal > 90 {
+			fmt.Printf("Network bandwidth usage high: %d Mbit/s available\n", netFreeMbit)
 		}
 	}
 }
